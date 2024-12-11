@@ -26,13 +26,24 @@ const verifyToken = (token) => {
 // @access  Public
 const registerUser = async (req, res, next) => {
   try {
-    var salt = await bcrypt.genSaltSync(10);
-    var hash = await bcrypt.hashSync(req.body.password, salt);
+    const salt = await bcrypt.genSalt(10);
+    const email = req.body.email;
+    const password = req.body.password;
+    const hash = await bcrypt.hash(req.body.password, salt);
+    let obj = null;
+
+    // Check if the credentials match the admin
+    if (email === process.env.ADMIN_EMAIL && password === process.env.ADMIN_PASSWORD) {
+        // Generate a token for the admin
+        obj = {...req.body,isAdmin : true, type : "admin"} ;
+        console.log(obj);
+    }
 
     const newUser = new User({
-      ...req.body,
+      ...obj,
       password: hash,
     });
+
 
     await newUser.save();
     res.status(200).send("User created successfully");
@@ -46,24 +57,27 @@ const registerUser = async (req, res, next) => {
 // @access  Public
 const loginUser = async (req, res, next) => {
   try {
-    const user = await User.findOne({ email: req.body.email });
+    const { email, password } = req.body;
+
+    // Check the database for normal users
+    const user = await User.findOne({ email });
     if (!user) {
-      return res.status(404).send("User not found");
+      return res.status(404).json("User not found");
     }
 
-    const isMatch = await bcrypt.compare(req.body.password, user.password);
+    const isMatch = await bcrypt.compare(password, user.password);
 
     if (!isMatch) {
-      return res.status(404).send("wrong password");
+      return res.status(400).json("Wrong password");
     }
 
-    //create the token
+    // Create a token for the regular user
     const token = jwt.sign(
-      { id: user, isAdmin: user.isAdmin },
+      { id: user._id, isAdmin: user.isAdmin },
       process.env.JWT
     );
 
-    const { password, isAdmin, ...otherDetails } = user._doc;
+    const { password: _, isAdmin, ...otherDetails } = user._doc;
     res
       .cookie("access_token", token, {
         httpOnly: true,
@@ -79,12 +93,14 @@ const loginUser = async (req, res, next) => {
 // @route   POST /api/logout
 // @access  Private
 const logoutUser = (req, res) => {
-  res.clearCookie("access_token"); // clear the access_token cookie
-  req.session.destroy(); // destroy the session
-  res.status(200).send("Logged out successfully"); // send a response to the client
+  res.clearCookie("access_token");
+  req.session?.destroy();
+  res.status(200).send("Logged out successfully");
 };
 
-//rest password request
+// @desc    Reset password request
+// @route   POST /api/reset-password-request
+// @access  Public
 const resetpasswordrequest = async (req, res) => {
   const { email } = req.body;
 
@@ -97,23 +113,21 @@ const resetpasswordrequest = async (req, res) => {
     const token = generateToken({ userId: user._id });
     const resetLink = `http://localhost:3000/reset-password?token=${token}`;
 
-    // create reusable transporter object using the default SMTP transport
     let transporter = nodemailer.createTransport({
       host: "smtp.office365.com",
       port: 587,
       secure: false,
       auth: {
-        user: "isurusanka98@gmail.com",
-        pass: "HGTim@98",
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS,
       },
       tls: {
         ciphers: "SSLv3",
       },
     });
 
-    // send mail with defined transport object
     let info = await transporter.sendMail({
-      from: "isurusanka98@gmail.com",
+      from: process.env.EMAIL_USER,
       to: email,
       subject: "Reset Password",
       text: `Please click on the following link to reset your password: ${resetLink}`,
@@ -128,7 +142,9 @@ const resetpasswordrequest = async (req, res) => {
   }
 };
 
-//rest password
+// @desc    Reset password
+// @route   POST /api/reset-password
+// @access  Public
 const resetpassword = async (req, res) => {
   const { token, password } = req.body;
 
@@ -139,8 +155,8 @@ const resetpassword = async (req, res) => {
       return res.status(404).json({ message: "User not found" });
     }
 
-    var salt = await bcrypt.genSaltSync(10);
-    var hash = await bcrypt.hashSync(password, salt);
+    const salt = await bcrypt.genSalt(10);
+    const hash = await bcrypt.hash(password, salt);
 
     user.password = hash;
     await user.save();
@@ -152,6 +168,9 @@ const resetpassword = async (req, res) => {
   }
 };
 
+// @desc    Check if email exists
+// @route   GET /api/check-email
+// @access  Public
 const checkEmailExists = async (req, res, next) => {
   try {
     const { email } = req.query;
