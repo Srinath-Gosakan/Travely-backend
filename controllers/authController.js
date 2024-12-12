@@ -39,6 +39,8 @@ const registerUser = async (req, res, next) => {
         console.log(obj);
     }
 
+    obj = {...req.body,type:"traveller"};
+
     const newUser = new User({
       ...obj,
       password: hash,
